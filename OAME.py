@@ -97,30 +97,24 @@ EVENT_CODES = {
 }
 
 ZONES = {
-    # Macro Layout
     "00": "00 (Full Basement/Garage ) ", "01": "01 (Full First Floor ) ", "02": "02 (Full Second Floor ) ",
     "03": "03 (Full Attic Crawlspace ) ", "04": "04 (Entire House ) ", "05": "05 (Full Back Yard/Deck ) ",
     "06": "06 (Full Front/Side Lawn ) ",
-    # Subterranean Sectors
     "40": "40 (Garage ) ", "41": "41 (Basement Main ) ", "42": "42 (Pittsburgh Potty ) ",
     "43": "43 (Storage/Wind Shelter ) ", "44": "44 (Staircase Landing ) ", "45": "45 (Under Staircase ) ",
     "46": "46 (Lower Basement Stairs ) ",
-    # Main Operations Hub (First Floor)
     "10": "10 (Top Basement Stairs ) ", "11": "11 (Kitchen ) ", "12": "12 (Dining Room ) ",
     "13": "13 (Dining/Living Border ) ", "14": "14 (Living Room ) ", "15": "15 (Entranceway ) ",
     "16": "16 (Back Sliding Door ) ", "17": "17 (Catio ) ", "18": "18 (2nd Floor Landing ) ",
     "19": "19 (Bottom 2nd Floor Stairs ) ",
-    # High Council Quarters (Second Floor)
     "20": "20 (Top 2nd Floor Stairs ) ", "21": "21 (Landing/Litter Box ) ", "22": "22 (Central Hallway ) ",
     "23": "23 (Upstairs Bathroom ) ", "24": "24 (Dads Room ) ", "25": "25 (Mums Room ) ",
     "26": "26 (My Room ) ", "27": "27 (Banister Reach Zone ) ", "28": "28 (Shower Sector ) ",
     "29": "29 (Test Sector ) ",
-    # Perimeter Outposts (Backyard & Deck)
     "50": "50 (The Deck ) ", "51": "51 (Deck Staircase ) ", "52": "52 (The Patio ) ",
     "53": "53 (Patio/Garden Strip ) ", "54": "54 (Wildflower Garden ) ", "55": "55 (Side Strip Back ) ",
     "56": "56 (Side Strip Front/Grass ) ", "57": "57 (Driveway ) ", "58": "58 (Driveway Landing ) ",
     "59": "59 (East Fence Plants ) ",
-    # Outer Border Infrastructure (Front & Streets - Meme Protection Active)
     "60": "60 (Front Porch ) ", "61": "61 (Front West Lawn ) ", "62": "62 (Front East Lawn ) ",
     "63": "63 (Front Walkway ) ", "64": "64 (Public Sidewalk ) ", "65": "65 (Oglethorpe Ave ) ",
     "66": "66 (Antoinette St ) ", "68": "68 (Retaining Wall ) ", "70": "70 (Side Lawn ) ",
@@ -130,7 +124,6 @@ ZONES = {
 def generate_purge ( ) :
     try:
         r_iss = combo_iss.get ( )
-        # Splits on whitespace and grabs the dictionary key directly
         selected_text = combo_al.get ( )
         r_al = selected_text.split ( " " ) [0]
         
@@ -140,9 +133,7 @@ def generate_purge ( ) :
         chks = sorted ( [int ( k) for k, v in zone_vars.items ( ) if v.get ( ) ])
         
         if not chks or not r_iss or not r_al or not r_tm or not r_dt:
-            return messagebox.showerror ( "Error", "Missing fields or no zones selected!")
-        
-        # Span optimization loop
+            return messagebox.showerror ( "Error", "Missing fields or no zones selected")
         spans, start, prev = [], chks[0], chks[0]
         for c in chks[1:]:
             if c == prev + 1:
@@ -164,49 +155,38 @@ def generate_purge ( ) :
     except Exception as e:
         messagebox.showerror ( "Error", str ( e ) )
 
-# --- UI STRUCTURAL GRID SETUP ---
 root = tk.Tk ( )
 root.title ( "OAME Mini v4 - Oglethorpe Alert Message Encoding Encoder")
 root.geometry ( "650x550")
-
-# Top Telecom Configuration Panel
 f_top = ttk.LabelFrame ( root, text=" Telecommunications Protocol Configuration ", padding=5)
 f_top.pack ( fill=tk.X, padx=10, pady=5)
 
 combo_iss = ttk.Combobox ( f_top, values=ORIGINATORS, width=7, state="readonly")
 combo_iss.pack ( side=tk.LEFT, padx=5 ) ; combo_iss.set ( "EAS")
 
-# Alphabetically sorts the massive array of emergency codes
 sorted_events = [EVENT_CODES[k] for k in sorted ( EVENT_CODES.keys ( ) ) ]
 combo_al = ttk.Combobox ( f_top, values=sorted_events, width=38, state="readonly")
 combo_al.pack ( side=tk.LEFT, padx=5 ) ; combo_al.set ( "INT (Internal Test)")
 
-
-# 1. Fetch system clock 
 now = datetime.datetime.now()
 
-# 2. Check midnight boundary condition (between 23:46 and 23:59)
 if now.hour == 23 and now.minute >= 46:
     target_date = now + datetime.timedelta(days=1)
 else:
     target_date = now
 
-# 3. Calculate next 15-minute interval for TM
 minutes_to_add = 15 - (now.minute % 15)
 if minutes_to_add == 15 and now.second == 0:
     minutes_to_add = 0
 next_15 = now + datetime.timedelta(minutes=minutes_to_add)
 
-# 4. Format strings
 formatted_tm = next_15.strftime("%H%M+0000")
 formatted_dt = target_date.strftime("%m%d")
 
-# 5. Build and inject entry TM
 entry_tm = ttk.Entry(f_top, width=12)
 entry_tm.pack(side=tk.LEFT, padx=5)
 entry_tm.insert(0, formatted_tm)
 
-# 6. Build and inject entry DT
 entry_dt = ttk.Entry(f_top, width=6)
 entry_dt.pack(side=tk.LEFT, padx=5)
 entry_dt.insert(0, formatted_dt)
@@ -234,11 +214,9 @@ for idx, key in enumerate ( sorted_keys ) :
     r, c = idx // 2, idx % 2 # Double-column tactical arrangement
     cb = ttk.Checkbutton ( scroll_frame, text=ZONES[key], variable=zone_vars[key])
     cb.grid ( row=r, column=c, sticky=tk.W, padx=10, pady=2)
+    
+ttk.Button ( root, text= "GENERATE PACKET BURST", command=generate_purge ) .pack ( pady=5)
 
-# Action Compile Button
-ttk.Button ( root, text="⚡ TRANSMIT PACKET BURST", command=generate_purge ) .pack ( pady=5)
-
-# High-Visibility Output Terminus
 output_text = tk.Text ( root, height=2, width=70, font= ( "Courier", 11, "bold" ) , fg="#00FF00", bg="#111111")
 output_text.pack ( padx=10, pady=10)
 
