@@ -4,48 +4,42 @@ import queue
 import threading
 import subprocess
 import os
+import time
 import numpy as np
 import soundfile as sf
 import sounddevice as sd
 import requests
 
 # --- Constants ---
-SAMPLE_RATE = 80000         
+SAMPLE_RATE = 80000        
 BAUD_RATE = 520.8333        
 FREQ_MARK, FREQ_SPACE = 2083.33, 1562.50        
 PREAMBLE_BITS = 128         
 SAMPLES_PER_BIT = int(SAMPLE_RATE / BAUD_RATE)
 CHUNKS_PER_BUFFER = 1024 
 
+# FIPS/SAME Target Zones
+TARGET_ZONES = {"042003", "142003", "242003", "342003", "442003", "542003", "642003", "742003", "842003", "942003", "000000", "042000"} 
+
 def text_to_bits(text_string, include_preamble=True):
-    """
-    Converts string characters to an 8-bit stream sent LSB-first.
-    Appends the true NWS/SAME preamble (16 bytes of 0xAB) if requested.
-    """
     bit_stream = []
+    true_preamble_byte = [1, 1, 0, 1, 0, 1, 0, 1]
     
-    if True:
-        # Hex 0xAB in binary is 10101011. Sent LSB-First, this becomes: [1, 1, 0, 1, 0, 1, 0, 1]
-        true_preamble_byte = [1, 1, 0, 1, 0, 1, 0, 1]
-        if include_preamble:
-            for _ in range(16):
-                bit_stream.extend(true_preamble_byte)
-        else:
-            for _ in range(16):
-                bit_stream.extend(true_preamble_byte)
+    if include_preamble:
+        for _ in range(16):
+            bit_stream.extend(true_preamble_byte)
+    else:
+        for _ in range(16):
+            bit_stream.extend(true_preamble_byte)
             
     for char in text_string:
         byte_val = ord(char)
-        # Standard EAS/SAME rule: Send the 8-bit byte out Least Significant Bit (LSB) first
         for i in range(8):
             bit_stream.append((byte_val >> i) & 1)
-    if True:
-        # Hex 0xAB in binary is 10101011. Sent LSB-First, this becomes: [1, 1, 0, 1, 0, 1, 0, 1]
-        true_preamble_byte = [1, 1, 0, 1, 0, 1, 0, 1]
-        for _ in range(4):
-            bit_stream.extend(true_preamble_byte)
-    return bit_stream
 
+    for _ in range(4):
+        bit_stream.extend(true_preamble_byte)
+    return bit_stream
 
 def generate_afsk_chunk(bit_stream):
     audio_samples = []
@@ -76,7 +70,6 @@ def read_and_resample_wav(filepath):
     return data.astype(np.int16)
 
 def run_tts(text):
-    """Generates an American-accented EAS robotic voice with tightened word pacing."""
     temp_tts = f"temp_live_tts_{threading.get_ident()}.wav"
     try:
         subprocess.run(
@@ -85,33 +78,26 @@ def run_tts(text):
             stdout=subprocess.DEVNULL, 
             stderr=subprocess.DEVNULL
         )
-        
         audio = read_and_resample_wav(temp_tts)
-        
         if os.path.exists(temp_tts):
             os.remove(temp_tts)
         return audio
-        
     except Exception:
         if os.path.exists(temp_tts):
             try: os.remove(temp_tts)
             except: pass
         return np.array([], dtype=np.int16)
 
-
 class BroadcastSystem:
     def __init__(self):
         self.loop_items = []  
         self.eas_queue = queue.Queue()  
-        
         self.current_loop_idx = 0
         self.current_array = np.array([], dtype=np.int16)
         self.array_pointer = 0
-        
         self.is_playing_eas = False
         self.lock = threading.Lock()
         
-        # Audio device stream setup
         self.stream = sd.OutputStream(
             samplerate=SAMPLE_RATE, 
             channels=1, 
@@ -122,17 +108,14 @@ class BroadcastSystem:
         self.stream.start()
 
     def update_loop(self, chunk_list):
-        """Replaces standard loop content seamlessly or schedules it after current EAS finishes."""
         with self.lock:
             self.loop_items = chunk_list
             self.current_loop_idx = 0
-            # If not in EAS, swap pointers immediately to reflect changes
             if not self.is_playing_eas:
                 self.current_array = self.loop_items[0] if self.loop_items else np.array([], dtype=np.int16)
                 self.array_pointer = 0
 
     def trigger_eas_interrupt(self, eas_audio_payload):
-        """Forces the stream to dump its current position mid-buffer and inject EAS blocks immediately."""
         with self.lock:
             self.is_playing_eas = True
             self.current_array = eas_audio_payload
@@ -153,7 +136,6 @@ class BroadcastSystem:
                     self.array_pointer += take_samples
                     write_idx += take_samples
                 else:
-                    # Current audio asset is exhausted. Find the next slice.
                     if self.is_playing_eas:
                         self.is_playing_eas = False
                         self.current_loop_idx = 0
@@ -176,10 +158,8 @@ class BroadcastSystem:
 
             outdata[:] = out_buffer.reshape(-1, 1)
 
-
 system_engine = BroadcastSystem()
 
-# --- GUI Application Logic ---
 def append_to_loop():
     f_path = entry_file_path.get().strip().replace("'", "").replace('"', "")
     r_body = text_body.get("1.0", tk.END).strip()
@@ -192,7 +172,6 @@ def append_to_loop():
                 if f_path and os.path.exists(f_path):
                     chunks.append(read_and_resample_wav(f_path))
                 else:
-                    # Run on main thread to show error safely
                     root.after(0, lambda: messagebox.showerror("Error", f"Siphon path invalid or missing:\n{f_path}"))
                     return
             else:
@@ -202,7 +181,6 @@ def append_to_loop():
             if chunks:
                 new_rotation = system_engine.loop_items + chunks
                 system_engine.update_loop(new_rotation)
-                # Update UI elements safely using root.after
                 root.after(0, lambda: lbl_status.config(text=f"Rotation Updated ({len(new_rotation)} Items in Loop)"))
         except Exception as e:
             root.after(0, lambda: messagebox.showerror("Error", str(e)))
@@ -214,7 +192,6 @@ def clear_active_loop():
     lbl_status.config(text="Loop Cleared. Playing Dead Air...")
 
 def deploy_eas_priority():
-    # 1. Fetch ALL UI values safely on the MAIN thread first
     r_head = entry_header.get().strip().upper()
     r_foot = entry_footer.get().strip().upper()
     r_body = text_body.get("1.0", tk.END).strip()
@@ -236,7 +213,6 @@ def deploy_eas_priority():
             eas_chunks = []
             silence_1s = np.zeros(SAMPLE_RATE, dtype=np.int16)
 
-            # 3x Header Sends - ONLY runs if a header string is provided
             if r_head:
                 h_audio = generate_afsk_chunk(text_to_bits(r_head + "\r\n", True))
                 for _ in range(3):
@@ -261,7 +237,6 @@ def deploy_eas_priority():
                     eas_chunks.append(silence_1s)
             if eas_chunks:
                 full_eas_audio = np.concatenate(eas_chunks)
-                # Fire structural interrupt routine immediately 
                 system_engine.trigger_eas_interrupt(full_eas_audio)
             
             root.after(0, lambda: lbl_status.config(text="TRANSMITTING EAS INTERRUPTION LIVE"))
@@ -270,20 +245,93 @@ def deploy_eas_priority():
 
     threading.Thread(target=worker, daemon=True).start()
 
+def start_alert_monitor():
+    processed_alerts = set()
+
+    def monitor_loop():
+        headers = {'User-Agent': 'ProBugEASMonitor/2.0 (contact: test@example.com)'}
+        url = "https://api.weather.gov/alerts/active?area=PA"
+
+        while True:
+            try:
+                response = requests.get(url, headers=headers, timeout=15)
+                if response.status_code == 200:
+                    data = response.json()
+                    features = data.get("features", [])
+
+                    for feature in features:
+                        properties = feature.get("properties", {})
+                        alert_id = properties.get("id")
+
+                        if alert_id in processed_alerts:
+                            continue
+
+                        geocode = properties.get("geocode", {})
+                        same_codes = geocode.get("SAME", [])
+                        ugc_codes = properties.get("UGC", [])
+
+                        is_target = any(zone in same_codes for zone in TARGET_ZONES)
+
+                        if not is_target:
+                            is_target = any("PAC003" in code for code in ugc_codes)
+
+                        if is_target:
+                            processed_alerts.add(alert_id)
+                            
+                            event_name = properties.get("event", "Weather Alert")
+                            headline = properties.get("headline", "")
+                            description = properties.get("description", "No details provided.")
+                            tts_message = f"The National Weather Service has issued a {event_name}. {headline}. {description}"
+
+                            root.after(0, lambda ev=event_name: lbl_status.config(
+                                text=f"⚠️ AUTO EAS INJECTION: {ev}", bg="#990000", fg="white"
+                            ))
+
+                            eas_chunks = []
+                            silence_1s = np.zeros(SAMPLE_RATE, dtype=np.int16)
+
+                            header_text = "ZCZC-WXR-" + event_name[:3].upper() + "-042003+0100-2301500-WXR-STATION-"
+                            h_audio = generate_afsk_chunk(text_to_bits(header_text + "\r\n", True))
+                            for _ in range(3):
+                                eas_chunks.append(h_audio)
+                                eas_chunks.append(silence_1s)
+
+                            eas_chunks.append(generate_eas_attention_signal(8.0))
+                            eas_chunks.append(silence_1s)
+
+                            eas_chunks.append(run_tts(tts_message))
+                            eas_chunks.append(np.zeros(int(SAMPLE_RATE * 1.5), dtype=np.int16))
+
+                            f_audio = generate_afsk_chunk(text_to_bits("NNNN" + "\r\n", False))
+                            for _ in range(3):
+                                eas_chunks.append(f_audio)
+                                eas_chunks.append(silence_1s)
+
+                            full_audio = np.concatenate(eas_chunks)
+                            system_engine.trigger_eas_interrupt(full_audio)
+
+                            root.after(0, lambda: lbl_status.config(
+                                text="TRANSMITTING EAS INTERRUPTION LIVE", bg="#333", fg="#00FF00"
+                            ))
+
+            except Exception:
+                pass
+
+            time.sleep(30)
+
+    threading.Thread(target=monitor_loop, daemon=True).start()
 
 root = tk.Tk()
 root.title("BUG Weatherbot Studio + OAME/SAME Functionality v2")
 root.geometry("500x610")
 root.resizable(False, False)
 
-# Main container
 main_frame = ttk.Frame(root, padding="15")
 main_frame.pack(fill=tk.BOTH, expand=True)
 
-# Status Monitor display banner
 lbl_status = tk.Label(
     main_frame, 
-    text="System Idle (Dead Air)", 
+    text="System Idle (Monitoring NWS API)", 
     bg="#333", 
     fg="#00FF00", 
     font=("Courier", 11, "bold"), 
@@ -293,7 +341,6 @@ lbl_status = tk.Label(
 )
 lbl_status.pack(fill=tk.X, pady=5)
 
-# Framing Codes Controls
 ttk.Label(main_frame, text="1. EAS Header Code String:").pack(anchor=tk.W, pady=2)
 entry_header = ttk.Entry(main_frame, width=55, font=("Courier", 10))
 entry_header.insert(0, "OGZC-CRS-ADR-0000+0100-0101+00")
@@ -304,7 +351,6 @@ entry_tone_len = ttk.Entry(main_frame, width=15)
 entry_tone_len.insert(0, "8.0")
 entry_tone_len.pack(pady=2)
 
-# Source Routing Toggles
 var_use_file = tk.BooleanVar()
 ttk.Checkbutton(main_frame, text="Use External WAV Target instead of generating TTS", variable=var_use_file).pack(anchor=tk.W, pady=2)
 
@@ -312,7 +358,6 @@ ttk.Label(main_frame, text="External Target Filepath (.wav):").pack(anchor=tk.W,
 entry_file_path = ttk.Entry(main_frame, width=55, font=("Courier", 9))
 entry_file_path.pack(pady=2)
 
-# Core Body message processing unit
 ttk.Label(main_frame, text="3. Voice Announcement / Text Input (TTS Engine):").pack(anchor=tk.W, pady=2)
 text_body = tk.Text(main_frame, height=4, width=60, font=("Arial", 10))
 text_body.insert("1.0", "The National Weather Service has issued a severe statement.")
@@ -323,7 +368,6 @@ entry_footer = ttk.Entry(main_frame, width=55, font=("Courier", 10))
 entry_footer.insert(0, "OGNN")
 entry_footer.pack(pady=2)
 
-# Execution Action buttons block
 btn_frame = ttk.Frame(main_frame, padding="5")
 btn_frame.pack(fill=tk.X, pady=10)
 
@@ -341,4 +385,5 @@ btn_eas = tk.Button(
 )
 btn_eas.pack(fill=tk.X, pady=5)
 
+start_alert_monitor()
 root.mainloop()
