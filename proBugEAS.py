@@ -9,9 +9,10 @@ import numpy as np
 import soundfile as sf
 import sounddevice as sd
 import requests
+import SAME
 
 # --- Constants ---
-SAMPLE_RATE = 80000        
+SAMPLE_RATE = 80000       
 BAUD_RATE = 520.8333        
 FREQ_MARK, FREQ_SPACE = 2083.33, 1562.50        
 PREAMBLE_BITS = 128         
@@ -21,17 +22,33 @@ CHUNKS_PER_BUFFER = 1024
 # FIPS/SAME Target Zones
 TARGET_ZONES = {"042003", "142003", "242003", "342003", "442003", "542003", "642003", "742003", "842003", "942003", "000000", "042000"} 
 
-def text_to_bits(text_string, include_siren=True, siren_gothroughs=4, siren_length=16):
+def text_to_bits(text_string, include_siren=True, siren_gothroughs=4, siren_length=16, siren_only=False):
     bit_stream = []
-    true_preamble_byte = [1, 1, 0, 1, 0, 1, 0, 1]
     endamble_byte_1 = [0, 0, 0, 0, 0, 0, 0, 0]
     endamble_byte_2 = [1, 1, 1, 1, 1, 1, 1, 1]
+    endamble_byte_3 = [1, 1, 0, 1, 0, 1, 0, 1]
+    
+    # 1. Standalone Pure Siren Mode (Returns early to prevent header protocol leaking)
+    if siren_only:
+        for i in range(int(siren_gothroughs)):
+            for j in range(int(siren_length)):
+                bit_stream.extend(endamble_byte_2)
+            for J in range(int(siren_length)):
+                bit_stream.extend(endamble_byte_1)
+        return bit_stream
+
+    # 2. Standard Protocol Data Blocks
+    true_preamble_byte = [1, 1, 0, 1, 0, 1, 0, 1]
     if include_siren:
         for i in range(int(siren_gothroughs)):
             for j in range(int(siren_length)):
                 bit_stream.extend(endamble_byte_2)
             for J in range(int(siren_length)):
                 bit_stream.extend(endamble_byte_1)
+    for i in range(2):
+        bit_stream.extend(endamble_byte_2)
+    for i in range(1):
+        bit_stream.extend(endamble_byte_1)
     for i in range(16):
         bit_stream.extend(true_preamble_byte)
             
@@ -40,8 +57,9 @@ def text_to_bits(text_string, include_siren=True, siren_gothroughs=4, siren_leng
         for i in range(8):
             bit_stream.append((byte_val >> i) & 1)
 
-    bit_stream.extend(endamble_byte_1)
-    bit_stream.extend(endamble_byte_2);    bit_stream.extend(endamble_byte_2)
+    bit_stream.extend(endamble_byte_3)
+    bit_stream.extend(endamble_byte_2)
+    bit_stream.extend(endamble_byte_2)
     return bit_stream
 
 def generate_afsk_chunk(bit_stream):
@@ -216,7 +234,7 @@ def deploy_eas_priority():
             "The combined total of Siren Goarounds and Siren Length exceeds 96!\n\nDo you wish to proceed?"
         )
         if not confirm:
-            return  # Halts execution if user selects 'No'
+            return
         
     if use_file and (not f_path or not os.path.exists(f_path)):
         return messagebox.showerror("Error", f"Siphon path invalid or missing:\n{f_path}")
@@ -228,16 +246,27 @@ def deploy_eas_priority():
             eas_chunks = []
             silence_1s = np.zeros(SAMPLE_RATE, dtype=np.int16)
 
-            if r_head:
-                h_audio = generate_afsk_chunk(text_to_bits(r_head + "-", use_siren, t_goa, t_slen))
+            # Check if header is missing but siren is explicitly wanted
+            if not r_head and use_siren:
+                # Explicitly activates the siren_only parameter to bypass standard protocol bits
+                siren_only_bits = text_to_bits("", include_siren=False, siren_gothroughs=t_goa, siren_length=t_slen, siren_only=True)
+                siren_audio = generate_afsk_chunk(siren_only_bits)
+                eas_chunks.append(siren_audio)
+                eas_chunks.append(silence_1s)
+            
+            # Standard logic if a header code is provided
+            elif r_head:
+                h_audio = generate_afsk_chunk(text_to_bits(r_head + "-", use_siren, t_goa, t_slen, siren_only=False))
                 for _ in range(3):
                     eas_chunks.append(h_audio)
                     eas_chunks.append(silence_1s)
 
+            # Attention tone layer
             if t_len > 0:
                 eas_chunks.append(generate_eas_attention_signal(t_len))
                 eas_chunks.append(silence_1s)
 
+            # Audio content generation 
             if use_file:
                 eas_chunks.append(read_and_resample_wav(f_path))
             elif r_body:
@@ -245,11 +274,13 @@ def deploy_eas_priority():
 
             eas_chunks.append(np.zeros(int(SAMPLE_RATE * 1.5), dtype=np.int16))
 
-            if r_foot:
-                f_audio = generate_afsk_chunk(text_to_bits(r_foot, False))
+            # Only append footer if header wasn't blank
+            if r_head and r_foot:
+                f_audio = generate_afsk_chunk(text_to_bits(r_foot, False, siren_only=False))
                 for _ in range(3):
                     eas_chunks.append(f_audio)
                     eas_chunks.append(silence_1s)
+                    
             if eas_chunks:
                 full_eas_audio = np.concatenate(eas_chunks)
                 system_engine.trigger_eas_interrupt(full_eas_audio)
@@ -296,38 +327,34 @@ def start_alert_monitor():
                             event_name = properties.get("event", "Weather Alert")
                             headline = properties.get("headline", "")
                             description = properties.get("description", "No details provided.")
-                            tts_message = f"The National Weather Service has issued a {event_name}. {headline}. {description}"
+                            
+                            event_code = event_name[:3].upper()
+                            
+                            try:
+                                generated_header = SAME.encode_same_string(
+                                    event_code=event_code,
+                                    target_counties=["allegheny_pa"],
+                                    duration_hours=1
+                                )
+                            except Exception:
+                                generated_header = f"ZCZC-WXR-{event_code}-042003+0100-2301500-WXR-STATION-"
 
-                            root.after(0, lambda ev=event_name: lbl_status.config(
-                                text=f"⚠️ AUTO EAS INJECTION: {ev}", bg="#990000", fg="white"
-                            ))
+                            generated_body = f"The National Weather Service has issued a {event_name}. {headline}. {description}"
+                            generated_footer = "NNNN"
 
-                            eas_chunks = []
-                            silence_1s = np.zeros(SAMPLE_RATE, dtype=np.int16)
+                            def update_gui_and_click():
+                                entry_header.delete(0, tk.END)
+                                entry_header.insert(0, generated_header)
+                                
+                                text_body.delete("1.0", tk.END)
+                                text_body.insert("1.0", generated_body)
+                                
+                                entry_footer.delete(0, tk.END)
+                                entry_footer.insert(0, generated_footer)
+                                
+                                btn_eas.invoke()
 
-                            header_text = "ZCZC-WXR-" + event_name[:3].upper() + "-042003+0100-2301500-WXR-STATION-"
-                            h_audio = generate_afsk_chunk(text_to_bits(header_text + "\r\n", True))
-                            for _ in range(3):
-                                eas_chunks.append(h_audio)
-                                eas_chunks.append(silence_1s)
-
-                            eas_chunks.append(generate_eas_attention_signal(8.0))
-                            eas_chunks.append(silence_1s)
-
-                            eas_chunks.append(run_tts(tts_message))
-                            eas_chunks.append(np.zeros(int(SAMPLE_RATE * 1.5), dtype=np.int16))
-
-                            f_audio = generate_afsk_chunk(text_to_bits("NNNN" + "\r\n", False))
-                            for _ in range(3):
-                                eas_chunks.append(f_audio)
-                                eas_chunks.append(silence_1s)
-
-                            full_audio = np.concatenate(eas_chunks)
-                            system_engine.trigger_eas_interrupt(full_audio)
-
-                            root.after(0, lambda: lbl_status.config(
-                                text="TRANSMITTING EAS INTERRUPTION LIVE", bg="#333", fg="#00FF00"
-                            ))
+                            root.after(0, update_gui_and_click)
 
             except Exception:
                 pass
