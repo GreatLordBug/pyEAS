@@ -21,24 +21,27 @@ CHUNKS_PER_BUFFER = 1024
 # FIPS/SAME Target Zones
 TARGET_ZONES = {"042003", "142003", "242003", "342003", "442003", "542003", "642003", "742003", "842003", "942003", "000000", "042000"} 
 
-def text_to_bits(text_string, include_preamble=True):
+def text_to_bits(text_string, include_siren=True, siren_gothroughs=4, siren_length=16):
     bit_stream = []
     true_preamble_byte = [1, 1, 0, 1, 0, 1, 0, 1]
-    
-    if include_preamble:
-        for _ in range(16):
-            bit_stream.extend(true_preamble_byte)
-    else:
-        for _ in range(16):
-            bit_stream.extend(true_preamble_byte)
+    endamble_byte_1 = [0, 0, 0, 0, 0, 0, 0, 0]
+    endamble_byte_2 = [1, 1, 1, 1, 1, 1, 1, 1]
+    if include_siren:
+        for i in range(int(siren_gothroughs)):
+            for j in range(int(siren_length)):
+                bit_stream.extend(endamble_byte_2)
+            for J in range(int(siren_length)):
+                bit_stream.extend(endamble_byte_1)
+    for i in range(16):
+        bit_stream.extend(true_preamble_byte)
             
     for char in text_string:
         byte_val = ord(char)
         for i in range(8):
             bit_stream.append((byte_val >> i) & 1)
 
-    for _ in range(4):
-        bit_stream.extend(true_preamble_byte)
+    bit_stream.extend(endamble_byte_1)
+    bit_stream.extend(endamble_byte_2);    bit_stream.extend(endamble_byte_2)
     return bit_stream
 
 def generate_afsk_chunk(bit_stream):
@@ -112,7 +115,7 @@ class BroadcastSystem:
             self.loop_items = chunk_list
             self.current_loop_idx = 0
             if not self.is_playing_eas:
-                self.current_array = self.loop_items[0] if self.loop_items else np.array([], dtype=np.int16)
+                self.current_array = self.loop_items if self.loop_items else np.array([], dtype=np.int16)
                 self.array_pointer = 0
 
     def trigger_eas_interrupt(self, eas_audio_payload):
@@ -140,7 +143,7 @@ class BroadcastSystem:
                         self.is_playing_eas = False
                         self.current_loop_idx = 0
                         if self.loop_items:
-                            self.current_array = self.loop_items[0]
+                            self.current_array = self.loop_items
                         else:
                             self.current_array = np.array([], dtype=np.int16)
                         self.array_pointer = 0
@@ -197,11 +200,23 @@ def deploy_eas_priority():
     r_body = text_body.get("1.0", tk.END).strip()
     f_path = entry_file_path.get().strip().replace("'", "").replace('"', "")
     use_file = var_use_file.get()
+    use_siren = var_use_siren.get()
 
     try:
         t_len = float(entry_tone_len.get() or 0.0)
+        t_goa = float(entry_siren_goarounds.get() or 0)
+        t_slen = float(entry_siren_length.get() or 0)
     except ValueError:
-        return messagebox.showerror("Error", "Invalid attention tone duration value!")
+        return messagebox.showerror("Error", "Invalid Number Input")
+
+    # --- NEW SIREN CONFIRMATION LOGIC ---
+    if (t_goa * t_slen) > 96:
+        confirm = messagebox.askyesno(
+            "Warning: Excessive Siren Parameters", 
+            "The combined total of Siren Goarounds and Siren Length exceeds 96!\n\nDo you wish to proceed?"
+        )
+        if not confirm:
+            return  # Halts execution if user selects 'No'
         
     if use_file and (not f_path or not os.path.exists(f_path)):
         return messagebox.showerror("Error", f"Siphon path invalid or missing:\n{f_path}")
@@ -214,7 +229,7 @@ def deploy_eas_priority():
             silence_1s = np.zeros(SAMPLE_RATE, dtype=np.int16)
 
             if r_head:
-                h_audio = generate_afsk_chunk(text_to_bits(r_head + "\r\n", True))
+                h_audio = generate_afsk_chunk(text_to_bits(r_head + "-", use_siren, t_goa, t_slen))
                 for _ in range(3):
                     eas_chunks.append(h_audio)
                     eas_chunks.append(silence_1s)
@@ -231,7 +246,7 @@ def deploy_eas_priority():
             eas_chunks.append(np.zeros(int(SAMPLE_RATE * 1.5), dtype=np.int16))
 
             if r_foot:
-                f_audio = generate_afsk_chunk(text_to_bits(r_foot + "\r\n", False))
+                f_audio = generate_afsk_chunk(text_to_bits(r_foot, False))
                 for _ in range(3):
                     eas_chunks.append(f_audio)
                     eas_chunks.append(silence_1s)
@@ -240,8 +255,8 @@ def deploy_eas_priority():
                 system_engine.trigger_eas_interrupt(full_eas_audio)
             
             root.after(0, lambda: lbl_status.config(text="TRANSMITTING EAS INTERRUPTION LIVE"))
-        except Exception as e:
-            root.after(0, lambda: messagebox.showerror("Error", str(e)))
+        except NameError as eRROR:
+            root.after(0, lambda: messagebox.showerror("Error", str(eRROR)))
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -346,6 +361,16 @@ entry_header = ttk.Entry(main_frame, width=55, font=("Courier", 10))
 entry_header.insert(0, "OGZC-CRS-ADR-0000+0100-0101+00")
 entry_header.pack(pady=2)
 
+ttk.Label(main_frame, text="Siren Goarounds").pack(anchor=tk.W, pady=2)
+entry_siren_goarounds= ttk.Entry(main_frame, width=15)
+entry_siren_goarounds.insert(0, "16")
+entry_siren_goarounds.pack(pady=2)
+
+ttk.Label(main_frame, text="Siren Length").pack(anchor=tk.W, pady=2)
+entry_siren_length= ttk.Entry(main_frame, width=15)
+entry_siren_length.insert(0, "4")
+entry_siren_length.pack(pady=2)
+
 ttk.Label(main_frame, text="2. Attention Signal Duration (Seconds):").pack(anchor=tk.W, pady=2)
 entry_tone_len = ttk.Entry(main_frame, width=15)
 entry_tone_len.insert(0, "8.0")
@@ -353,6 +378,9 @@ entry_tone_len.pack(pady=2)
 
 var_use_file = tk.BooleanVar()
 ttk.Checkbutton(main_frame, text="Use External WAV Target instead of generating TTS", variable=var_use_file).pack(anchor=tk.W, pady=2)
+
+var_use_siren = tk.BooleanVar()
+ttk.Checkbutton(main_frame, text="Use Siren", variable=var_use_siren).pack(anchor=tk.W, pady=2)
 
 ttk.Label(main_frame, text="External Target Filepath (.wav):").pack(anchor=tk.W, pady=2)
 entry_file_path = ttk.Entry(main_frame, width=55, font=("Courier", 9))
