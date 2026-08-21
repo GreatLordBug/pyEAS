@@ -19,7 +19,7 @@ except ModuleNotFoundError:
     import tomli as tomllib
 
 # --- Constants ---
-SAMPLE_RATE = 44100       
+SAMPLE_RATE = 80000       
 BAUD_RATE = 520.8333        
 FREQ_MARK, FREQ_SPACE = 2083.33, 1562.50        
 PREAMBLE_BITS = 128         
