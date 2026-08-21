@@ -1,0 +1,19 @@
+[app]
+header = "OGZC-CRS-ADR-0000+0100-0101+00"
+footer = "NNNN"
+tone_seconds = 8.0
+siren_placement = "attached"
+siren_goarounds = 16
+siren_length = 4
+use_file = false
+use_siren = true
+potato_siren = false
+external_target = ""
+voice_text = "The National Weather Service has issued a severe statement."
+
+[same]
+event = "ADR - Administrative Message"
+county_keys = ["042003"]
+duration = "0100"
+originator = "WXR"
+station_id = "BUG/HTTP"

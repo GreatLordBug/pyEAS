@@ -155,69 +155,70 @@ def generate_purge ( ) :
     except Exception as e:
         messagebox.showerror ( "Error", str ( e ) )
 
-root = tk.Tk ( )
-root.title ( "OAME Mini v4 - Oglethorpe Alert Message Encoding Encoder")
-root.geometry ( "650x550")
-f_top = ttk.LabelFrame ( root, text=" Telecommunications Protocol Configuration ", padding=5)
-f_top.pack ( fill=tk.X, padx=10, pady=5)
+if __name__ == "__main__":
+    root = tk.Tk ( )
+    root.title ( "OAME Mini v4 - Oglethorpe Alert Message Encoding Encoder")
+    root.geometry ( "650x550")
+    f_top = ttk.LabelFrame ( root, text=" Telecommunications Protocol Configuration ", padding=5)
+    f_top.pack ( fill=tk.X, padx=10, pady=5)
 
-combo_iss = ttk.Combobox ( f_top, values=ORIGINATORS, width=7, state="readonly")
-combo_iss.pack ( side=tk.LEFT, padx=5 ) ; combo_iss.set ( "EAS")
+    combo_iss = ttk.Combobox ( f_top, values=ORIGINATORS, width=7, state="readonly")
+    combo_iss.pack ( side=tk.LEFT, padx=5 ) ; combo_iss.set ( "EAS")
 
-sorted_events = [EVENT_CODES[k] for k in sorted ( EVENT_CODES.keys ( ) ) ]
-combo_al = ttk.Combobox ( f_top, values=sorted_events, width=38, state="readonly")
-combo_al.pack ( side=tk.LEFT, padx=5 ) ; combo_al.set ( "INT (Internal Test)")
+    sorted_events = [EVENT_CODES[k] for k in sorted ( EVENT_CODES.keys ( ) ) ]
+    combo_al = ttk.Combobox ( f_top, values=sorted_events, width=38, state="readonly")
+    combo_al.pack ( side=tk.LEFT, padx=5 ) ; combo_al.set ( "INT (Internal Test)")
 
-now = datetime.datetime.now()
+    now = datetime.datetime.now()
 
-if now.hour == 23 and now.minute >= 46:
-    target_date = now + datetime.timedelta(days=1)
-else:
-    target_date = now
+    if now.hour == 23 and now.minute >= 46:
+        target_date = now + datetime.timedelta(days=1)
+    else:
+        target_date = now
 
-minutes_to_add = 15 - (now.minute % 15)
-if minutes_to_add == 15 and now.second == 0:
-    minutes_to_add = 0
-next_15 = now + datetime.timedelta(minutes=minutes_to_add)
+    minutes_to_add = 15 - (now.minute % 15)
+    if minutes_to_add == 15 and now.second == 0:
+        minutes_to_add = 0
+    next_15 = now + datetime.timedelta(minutes=minutes_to_add)
 
-formatted_tm = next_15.strftime("%H%M+0000")
-formatted_dt = target_date.strftime("%m%d")
+    formatted_tm = next_15.strftime("%H%M+0000")
+    formatted_dt = target_date.strftime("%m%d")
 
-entry_tm = ttk.Entry(f_top, width=12)
-entry_tm.pack(side=tk.LEFT, padx=5)
-entry_tm.insert(0, formatted_tm)
+    entry_tm = ttk.Entry(f_top, width=12)
+    entry_tm.pack(side=tk.LEFT, padx=5)
+    entry_tm.insert(0, formatted_tm)
 
-entry_dt = ttk.Entry(f_top, width=6)
-entry_dt.pack(side=tk.LEFT, padx=5)
-entry_dt.insert(0, formatted_dt)
-# Scrollable Center Panel for Sector Targeting
-f_middle = ttk.LabelFrame ( root, text=" Targeted Micronation Grid Sectors ", padding=5)
-f_middle.pack ( fill=tk.BOTH, expand=True, padx=10, pady=5)
+    entry_dt = ttk.Entry(f_top, width=6)
+    entry_dt.pack(side=tk.LEFT, padx=5)
+    entry_dt.insert(0, formatted_dt)
+    # Scrollable Center Panel for Sector Targeting
+    f_middle = ttk.LabelFrame ( root, text=" Targeted Micronation Grid Sectors ", padding=5)
+    f_middle.pack ( fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-canvas = tk.Canvas ( f_middle, borderwidth=0, highlightthickness=0)
-scrollbar = ttk.Scrollbar ( f_middle, orient="vertical", command=canvas.yview)
-scroll_frame = ttk.Frame ( canvas)
+    canvas = tk.Canvas ( f_middle, borderwidth=0, highlightthickness=0)
+    scrollbar = ttk.Scrollbar ( f_middle, orient="vertical", command=canvas.yview)
+    scroll_frame = ttk.Frame ( canvas)
 
-scroll_frame.bind ( "<Configure>", lambda e: canvas.configure ( scrollregion=canvas.bbox ( "all" ) ) )
-canvas.create_window ( ( 0, 0 ) , window=scroll_frame, anchor="nw")
-canvas.configure ( yscrollcommand=scrollbar.set)
+    scroll_frame.bind ( "<Configure>", lambda e: canvas.configure ( scrollregion=canvas.bbox ( "all" ) ) )
+    canvas.create_window ( ( 0, 0 ) , window=scroll_frame, anchor="nw")
+    canvas.configure ( yscrollcommand=scrollbar.set)
 
-canvas.pack ( side="left", fill="both", expand=True)
-scrollbar.pack ( side="right", fill="y")
+    canvas.pack ( side="left", fill="both", expand=True)
+    scrollbar.pack ( side="right", fill="y")
 
-# Renders the 52 distinct zones across the domestic map
-zone_vars = {}
-sorted_keys = sorted ( ZONES.keys ( ) , key=lambda x: int ( x ) )
+    # Renders the 52 distinct zones across the domestic map
+    zone_vars = {}
+    sorted_keys = sorted ( ZONES.keys ( ) , key=lambda x: int ( x ) )
 
-for idx, key in enumerate ( sorted_keys ) :
-    zone_vars[key] = tk.BooleanVar ( )
-    r, c = idx // 2, idx % 2 # Double-column tactical arrangement
-    cb = ttk.Checkbutton ( scroll_frame, text=ZONES[key], variable=zone_vars[key])
-    cb.grid ( row=r, column=c, sticky=tk.W, padx=10, pady=2)
-    
-ttk.Button ( root, text= "GENERATE PACKET BURST", command=generate_purge ) .pack ( pady=5)
+    for idx, key in enumerate ( sorted_keys ) :
+        zone_vars[key] = tk.BooleanVar ( )
+        r, c = idx // 2, idx % 2 # Double-column tactical arrangement
+        cb = ttk.Checkbutton ( scroll_frame, text=ZONES[key], variable=zone_vars[key])
+        cb.grid ( row=r, column=c, sticky=tk.W, padx=10, pady=2)
 
-output_text = tk.Text ( root, height=2, width=70, font= ( "Courier", 11, "bold" ) , fg="#00FF00", bg="#111111")
-output_text.pack ( padx=10, pady=10)
+    ttk.Button ( root, text= "GENERATE PACKET BURST", command=generate_purge ) .pack ( pady=5)
 
-root.mainloop ( )
+    output_text = tk.Text ( root, height=2, width=70, font= ( "Courier", 11, "bold" ) , fg="#00FF00", bg="#111111")
+    output_text.pack ( padx=10, pady=10)
+
+    root.mainloop ( )
